@@ -231,7 +231,7 @@ for clusters in range(slider_clusters):
   for node in tops_per_cluster.iloc[:,clusters]:
       ax.annotate(gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].iloc[node[0],5],
               xy=(gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].iloc[node[0],1],
-                  gdf_patrimoine_final[gdf_patrimoine_spec['label'] == clusters].iloc[node[0],2]), 
+                  gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].iloc[node[0],2]), 
               xytext=(3,3), textcoords="offset points")
   
   
