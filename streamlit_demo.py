@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,10 +7,7 @@ from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
 import geopandas as gpd
 import contextily as ctx
-from sklearn.cluster import AgglomerativeClustering, SpectralClustering, DBSCAN
-from scipy.cluster.hierarchy import linkage
-from scipy.cluster.hierarchy import dendrogram
-from sklearn.metrics import silhouette_score
+from sklearn.cluster import SpectralClustering
 import networkx as nx
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import OPTICS
@@ -48,6 +46,7 @@ for top in top_shopping:
 
 
 # Sélection des paramètres utilisateur
+
 st.sidebar.title("Planification de l'itinéraire") 
 slider_clusters = st.sidebar.slider(label='Nombre de jours à Paris?',
                             min_value=1,
@@ -73,8 +72,8 @@ slider_nb_restos=st.sidebar.slider(label='Nombre de restaurants proposés',
                                    value=3,
                                    step=1)
 
-
-
+selectbox_type_restaurant = st.sidebar.selectbox(label='Type de restaurants', 
+                               options=['Peu importe', 'Restaurant traditionnel','Fast Food'])
 
 colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver',
       'maroon','indigo','fuchsia','darkgoldenrod','peachpuff','mediumaquamarine','whitesmoke','black']
@@ -85,7 +84,6 @@ spectral1 = SpectralClustering(n_clusters=15,affinity = 'nearest_neighbors').fit
 labelsspec1=spectral1.labels_
 gdf_patrimoine_spec=gdf_patrimoine.copy()
 gdf_patrimoine_spec['label']=labelsspec1
-
 
 
 # modèle Kmeans avec n_clusters = 15
@@ -155,8 +153,17 @@ for cluster in tops_coord.columns:
 top_centroids=top_centroids.transpose()
 
 # création d'un subjet avec les coordonnées des restaurants 
+if selectbox_type_restaurant=='Peu importe':
+    gdf_restaurants=gdf_paris[gdf_paris['categorie']=='restaurant']
+elif selectbox_type_restaurant=='Restaurant traditionnel':
+    gdf_restaurants=gdf_paris[(gdf_paris['categorie']=='restaurant')
+                              & (gdf_paris['type']=='restaurant')]
+elif selectbox_type_restaurant=='Fast Food':
+    gdf_restaurants=gdf_paris[(gdf_paris['categorie']=='restaurant')
+                              & (gdf_paris['type']=='fast_food')]
 
-gdf_restaurants=gdf_paris[gdf_paris['categorie']=='restaurant']
+
+
 gdf_restaurants.reset_index(inplace=True)
 Xr = gdf_restaurants['X'].to_numpy().reshape(-1, 1)
 Yr = gdf_restaurants['Y'].to_numpy().reshape(-1, 1)
@@ -181,6 +188,7 @@ shop_labels = optics_clf.labels_
 
 ## création des polygones à partir des clusters issues du modèle optics_clf
 gdf_shopping['labels']=shop_labels
+gdf_shopping=gdf_shopping[gdf_shopping['labels'] > -1]
 gdf_shopping_zones=gdf_shopping.copy()
 
 ## Transformations des clusters en Polygones géographiques
@@ -205,7 +213,7 @@ for cluster in top_centroids.index:
   xy=np.array([top_centroids.iloc[cluster,0],top_centroids.iloc[cluster,1]])
   shop_dist=cdist(XYs,[xy],metric='euclidean')
   shop_dist=pd.DataFrame(shop_dist)
-  liste=shop_dist.sort_values(by=0).head(8).index.tolist()
+  liste=shop_dist.sort_values(by=0).head(5).index.tolist()
   shop_centroids_index.append(liste)
 
 
@@ -213,7 +221,7 @@ for cluster in top_centroids.index:
 
 # Affichage des top 5 pagerank, restaurants et zones commerciales
 for clusters in range(slider_clusters):
-  colors = ['blue' for i in range(200)]
+  colors = ['blue' for i in range(120)]
   for node in tops_per_cluster.iloc[:,clusters]:
     colors[node[0]] = 'red'
   ax = gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].plot(color = colors, alpha = 0.8)
@@ -226,3 +234,4 @@ for clusters in range(slider_clusters):
   plt.axis('off')
   ctx.add_basemap(ax,crs=crs,zoom="auto")
   st.pyplot()
+  
