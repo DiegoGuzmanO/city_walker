@@ -213,7 +213,7 @@ for cluster in top_centroids.index:
 
 # Affichage des top 5 pagerank, restaurants et zones commerciales
 for clusters in range(slider_clusters):
-  colors = ['blue' for i in range(120)]
+  colors = ['blue' for i in range(200)]
   for node in tops_per_cluster.iloc[:,clusters]:
     colors[node[0]] = 'red'
   ax = gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].plot(color = colors, alpha = 0.8)
