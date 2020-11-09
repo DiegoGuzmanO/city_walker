@@ -1,1 +1,9 @@
 matplotlib
+pandas
+sklearn
+numpy
+scipy
+geopandas
+contextily
+networkx
+shapely
