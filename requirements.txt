@@ -7,3 +7,4 @@ geopandas
 contextily
 networkx
 shapely
+descartes
