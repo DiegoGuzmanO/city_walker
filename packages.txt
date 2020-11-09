@@ -1,2 +1,1 @@
-pip install pipreqs
-pip3 install pandas numpy matplotlib sklearn
+pip install pandas numpy matplotlib sklearn
