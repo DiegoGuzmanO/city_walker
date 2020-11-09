@@ -12,87 +12,29 @@ from scipy.cluster.hierarchy import dendrogram
 from sklearn.metrics import silhouette_score
 import networkx as nx
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import OPTICS
+from shapely.geometry import Point, Polygon
+
 st.set_option('deprecation.showPyplotGlobalUse', False)
 
-restau = pd.read_csv('restaurant_paris.csv', sep = ';')
-adj = pd.read_csv('Aires_de_jeux_Paris.csv',sep =';')
-monum = pd.read_csv('monument_paris.csv', sep = ';')
-shop = pd.read_csv('shopping_paris.csv', sep = ';')
+# Lecture du dataframe preprocessed
+df_paris = pd.read_csv('df_paris.csv', sep = ';')
+
+# Transformation du DataFrame en GeoDataFrame
+crs={'init':'epsg:4326'}
+gdf_paris = gpd.GeoDataFrame(
+    df_paris,crs=crs, geometry=gpd.points_from_xy(df_paris.X, df_paris.Y))
+
+#Création du SubSet Patrimoine
+gdf_patrimoine=gdf_paris[ (gdf_paris['categorie']=='patrimoine')]
 
 st.title('City Walker')
 st.header("Optimisateur d'itinéraire touristique - Paris")
-st.text('Danyl Delaisser, Diego Guzman aloha')
+st.text('Danyl Delaisser, Diego Guzman')
 st.text(' ')
-st.table(adj.head())
 
-# Adaptation du fichier restaurant
-restau['categorie']= 'restaurant'
 
-restau = restau.drop(['operator', 'brand', 'delivery','takeaway','stars','capacity', 'drive_through', 'wikidata',
-'brand_wikidata','siret'],axis=1)
-
-# Création de variables qui n'existent pas dans le dataset d'origine mais
-# que nous aimerions alimenter en webscrapping ou calculer en interne.
-restau ['notation'] = np.nan
-restau ['prix'] = np.nan
-restau ['enjoyment_rate'] = np.nan 
-
-# Adaptation du fichier restaurant
-adj['categorie']= 'aire de jeux'
-
-adj = adj.drop(['access', 'indoor', 'fee', 'supervised', 'min_age', 'max_age', 'operator', 'surface'],axis=1) 
-
-# Adaptation du fichier restaurant
-monum['categorie']= 'patrimoine'
-
-monum = monum.drop(['ref_mhs','religion','religion_denomination', 'inscription',
-              'build_date', 'description','civilization','heritage'],axis=1)
-
-# Adaptation du fichier restaurant
-shop['categorie']= 'shopping'
-
-shop = shop.drop(['operator','level','siret', 'wikidata', 'brand_wikidata'
-              ,'email'],axis=1)
-
-# Regroupement des fichiers
-df_paris = pd.merge(restau, adj, how = 'outer')
-df_paris = pd.merge(df_paris, shop, how = 'outer')
-df_paris = pd.merge(df_paris, monum, how = 'outer')
-
-# Nous pouvons supprimer la colonne "facebook" car elle est presque vide. 
-# Nous supprimons également toutes les lignes dont le "name" est vide.
-df_paris=df_paris.drop(columns='facebook')
-df_paris=df_paris.dropna(how="any",subset=["name"])
-
-# Nous allons supprimer les lignes de catégorie "restaurant" et de "type" : cafe, bar, pub et ice_cream
-df_paris=df_paris[(df_paris['type']!='cafe')]
-df_paris=df_paris[(df_paris['type']!='bar')]
-df_paris=df_paris[(df_paris['type']!='pub')]
-df_paris=df_paris[(df_paris['type']!='ice_cream')]
-
-#Ensuite, nous enlevons les lignes de catégorie "restaurant" dont la variable "cuisine" est vide
-index_a_supprimer=df_paris[ (df_paris['categorie']=='restaurant')&(df_paris['cuisine'].isnull())].index
-df_paris=df_paris.drop(index_a_supprimer)
-
-# Pour les lieux de catégorie "patrimoine", nous chosissons de supprimer
-# les lignes de "type" : tomb, tree, milestone et stone
-df_paris=df_paris[(df_paris['type']!='tomb')]
-df_paris=df_paris[(df_paris['type']!='tree')]
-df_paris=df_paris[(df_paris['type']!='milestone')]
-df_paris=df_paris[(df_paris['type']!='stone')]
-
-# Concernant la catégorie Shopping, nous allons garder une liste restreinte de "type".
-df_shopping=df_paris[df_paris.categorie=="shopping"]
-type_tokeep=['clothes','beauty','shoes','jewelry','gift','art','cosmetics','chocolate',
-             'wine','perfumery','cheese','tea','department_store','mall']
-
-index_todrop=[]
-for i in df_shopping.index:
-  if df_shopping.loc[i,'type'] not in type_tokeep:
-    index_todrop.append(i)
-df_paris=df_paris.drop(index_todrop)
-
-# Définition des sites populaires auprès des touristes
+# Définition des sites populaires auprès des touristes - PAS SUR DE GARDER CA
 top_patrimoine=['Palais du Louvre','Tour Eiffel','Cathédrale Notre-Dame','Basilique du Sacré-Cœur','Orsay',
                 'Galerie Raulin-Pompidou','Arc de Triomphe']
 for top in top_patrimoine:
@@ -103,453 +45,184 @@ top_shopping=['Galeries Lafayette Haussmann','Beaugrenelle - Magnetic','Forum le
 for top in top_shopping:
   df_paris.loc[df_paris.name==top, 'categorie']='shopping'
 
-crs={'init':'epsg:4326'}
-gdf_paris = gpd.GeoDataFrame(
-    df_paris,crs=crs, geometry=gpd.points_from_xy(df_paris.X, df_paris.Y))
-
-# Voici notre première visualisation de points sur Paris avec GeoPandas
-
-ax = gdf_paris.plot(figsize=(10, 10), alpha=0.5, edgecolor='k')
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
-
-# Sauvegarde de la figure
-fig = plt.gcf()
-fig.set_size_inches(16,9)
-plt.savefig("AllDotsOnMap.jpg", dpi = 300)
-
-st.pyplot(fig) 
-
-# On définit gdf_patrimoine une extraction des lignes de dfg_paris de catégorie "patrimoine"
-gdf_patrimoine=gdf_paris[ (gdf_paris['categorie']=='patrimoine')]
-
-# Calcul de la distortion et visualisation de la courbe
-distortions=[]
-k=np.arange(2,31).tolist()
-for i in k:
-  kmeans=KMeans(n_clusters=i).fit(gdf_patrimoine.loc[:,['X','Y']])
-  dist=sum(np.min(cdist(gdf_patrimoine.loc[:,['X','Y']],
-                        kmeans.cluster_centers_,metric='euclidean'),axis=1))/len(gdf_patrimoine)
-  distortions.append(dist)
-
-# Affichage du graphique et annotation
-plt.figure(figsize=(16,9))
-plt.plot(k,distortions,ls='-',marker='*')
-plt.xlim(1,30)
-plt.annotate('n clusters adéquat = 6 ?',xy=(6,0.0145),xytext=(10,0.0175),
-             arrowprops={'facecolor':'steelblue','arrowstyle':'fancy'})
-plt.xlabel('k Clusters')
-plt.ylabel('Distortion')
-plt.title('Courbe de distorsion - catégorie "Patrimoine"',fontsize=15)
-plt.show();
 
 
-# Sauvegarde de la figure
-fig.set_size_inches(9,9)
-plt.savefig("DistorsionPatrimoine.jpg", dpi = 300)
-st.pyplot() 
+# Sélection des paramètres utilisateur
+st.sidebar.title("Planification de l'itinéraire") 
+slider_clusters = st.sidebar.slider(label='Nombre de jours à Paris?',
+                            min_value=1,
+                            max_value=15,
+                            value=3,
+                            step=1)
 
-# Affichage des n_clusters=6 sur une carte :
-kmeans=KMeans(n_clusters=6).fit(gdf_patrimoine.loc[:,['X','Y']])
-labels=kmeans.labels_
-centroids=kmeans.cluster_centers_
+if slider_clusters <11 : 
+    modele_optimal = 'Spectral Clustering'
+else : 
+    modele_optimal = 'K-Means'
 
-colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver','maroon']
+st.sidebar.text('Le modèle optimal pour ce nombre ')
+st.sidebar.text('de jours est ')
+st.sidebar.text(modele_optimal)
 
-# Couleurs de points
-gdf_patrimoine.loc[:, 'label']=labels
-ax = gdf_patrimoine[gdf_patrimoine.label==0].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = 'black')
+slider_modele = st.sidebar.select_slider(label='Confirmez le modèle souhaité :',
+                                       options=['Spectral Clustering', 'K-Means'],value= modele_optimal)
 
-# Initialisation de la carte
-for color, label in zip(colors,gdf_patrimoine['label'].sort_values().unique()[1:]):
-  # Plotting des categories de lieux avec des couleurs differentes
-  ax = gdf_patrimoine[gdf_patrimoine['label'] == label].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = color, ax = ax)
+slider_nb_restos=st.sidebar.slider(label='Nombre de restaurants proposés',
+                                   min_value=1,
+                                   max_value=15,
+                                   value=3,
+                                   step=1)
 
-for color, top in zip(colors,top_patrimoine):
-   ax = gdf_patrimoine[gdf_patrimoine['name'] == top].plot(figsize=(15, 15), alpha=1, edgecolor='k', color = color, 
-                                                             ax = ax,marker='D',markersize =80,label=top)
-plt.legend()
-plt.title('Catégorie "Patrimoine" - n clusters=6',fontsize=20)
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
 
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("PatrimoineNClust6.jpg", dpi = 300)
-st.pyplot()
 
-# Les clusters couvrent des zones très vastes de Paris. Réessayons avec n_clusters=15
-kmeans2=KMeans(n_clusters=15).fit(gdf_patrimoine.loc[:,['X','Y']])
-labels2=kmeans2.labels_
-colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver',
-          'maroon','indigo','fuchsia','darkgoldenrod','peachpuff','mediumaquamarine','whitesmoke','black']
-
-# Couleurs de points
-gdf_patrimoine2=gdf_patrimoine.copy()
-gdf_patrimoine2['label']=labels2
-ax = gdf_patrimoine2[gdf_patrimoine2.label==0].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = 'black')
-
-# Initialisation de la carte
-for color, l in zip(colors,gdf_patrimoine2['label'].sort_values().unique()[1:]):
-  # Plotting des categories de lieux avec des couleurs differentes
-  ax = gdf_patrimoine2[gdf_patrimoine2['label'] == l].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = color, ax = ax)
-
-for color, top in zip(colors,top_patrimoine):
-   ax = gdf_patrimoine2[gdf_patrimoine2['name'] == top].plot(figsize=(15, 15), alpha=1, edgecolor='k', color = color, 
-                                                             ax = ax,marker='D',markersize =80,label=top)
-plt.legend()
-plt.title('Catégorie "Patrimoine" - n clusters = 15',fontsize=20)
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("PatrimoineNClust15.jpg", dpi = 300)
-st.pyplot()
-
-# Calcul de l'inertie totale de Patrimoine
-X = gdf_patrimoine2['X']
-Y = gdf_patrimoine2['Y']
-centroid = np.array([X.mean(), Y.mean()])
-XY = np.array([X, Y]).T
-inertie_totale = np.mean((XY - centroid)**2)
-inerties = []
-for cluster in gdf_patrimoine2['label'].unique():
-  X = gdf_patrimoine2[gdf_patrimoine2['label'] == cluster]['X']
-  Y = gdf_patrimoine2[gdf_patrimoine2['label'] == cluster]['Y']
-  centroid = np.array([X.mean(), Y.mean()])
-  XY = np.array([X, Y]).T
-  inertie = np.mean((XY - centroid)**2)
-  inerties.append(inertie/inertie_totale)
-
-# Tri des couleurs par inertie
-sorted_colors = []
-for i in np.argsort(inerties):
-  sorted_colors.append(colors[i])
-plt.bar(np.arange(0, 15, 1), np.sort(inerties), color = sorted_colors)
-plt.title('Inertie des 15 clusters - Patrimoine');
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("InertieKmeansPat.jpg", dpi = 300)
-st.pyplot()
-
-# Nous définissons gdf_shopping une extraction des lignes de gdf_paris de catégorie shopping
-gdf_shopping=gdf_paris[ (gdf_paris['categorie']=='shopping')]
-
-# Calcul de la distortion et visualisation de la courbe
-distortions=[]
-k=np.arange(2,31).tolist()
-for i in k:
-  kmeans=KMeans(n_clusters=i).fit(gdf_shopping.loc[:,['X','Y']])
-  dist=sum(np.min(cdist(gdf_shopping.loc[:,['X','Y']],
-                        kmeans.cluster_centers_,metric='euclidean'),axis=1))/len(gdf_shopping)
-  distortions.append(dist)
-
-# Affichage du graphique
-plt.figure(figsize=(16,9))
-plt.plot(k,distortions,ls='-',marker='*')
-plt.xlim(1,30)
-plt.xlabel('k Clusters')
-plt.ylabel('Distortion')
-plt.title('Courbe de distorsion - catégorie "Shopping"',fontsize=20)
-plt.show();
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("DistorsionShopping.jpg", dpi = 300)
-st.pyplot()
-
-# Affichage des n_clusters=6 sur une carte :
-kmeans=KMeans(n_clusters=6).fit(gdf_shopping.loc[:,['X','Y']])
-labels=kmeans.labels_
-centroids=kmeans.cluster_centers_
-
-colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver','maroon']
-
-# Couleurs de points
-gdf_shopping['label']=labels
-ax = gdf_shopping[gdf_shopping.label==0].plot(figsize=(15,15), alpha=0.5, edgecolor='k', color = 'black')
-
-# Initialisation de la carte
-for color, label in zip(colors,gdf_shopping['label'].sort_values().unique()[1:]):
-  # Plotting des categories de lieux avec des couleurs differentes
-  ax = gdf_shopping[gdf_shopping['label'] == label].plot(figsize=(15,15), alpha=0.5, edgecolor='k', color = color, ax = ax)
-
-for color, top in zip(colors,top_shopping):
-   ax = gdf_shopping[gdf_shopping['name'] == top].plot(figsize=(15,15), alpha=1, edgecolor='k', color = color, 
-                                                             ax = ax,marker='D',markersize =80,label=top)
-plt.title('Catégorie "Shopping" - n clusters=6',fontsize=20)
-plt.legend()
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
-
-# Sauvegarde de la figure
-fig = plt.gcf()
-fig.set_size_inches(16,9)
-plt.savefig("ShoppingNClust6.jpg", dpi = 300)
-st.pyplot()
-
-# Les clusters couvrent des zones très vastes de Paris. Voici un test avec n_clusters=15
-kmeans2=KMeans(n_clusters=15).fit(gdf_shopping.loc[:,['X','Y']])
-labels2=kmeans2.labels_
-colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver',
-          'maroon','indigo','fuchsia','darkgoldenrod','peachpuff','mediumaquamarine','whitesmoke','black']
-
-# Couleurs de points
-gdf_shopping2=gdf_shopping.copy()
-gdf_shopping2['label']=labels2
-ax = gdf_shopping2[gdf_shopping2.label==0].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = 'black')
-
-# Initialisation de la carte
-for color, l in zip(colors,gdf_shopping2['label'].sort_values().unique()[1:]):
-  # Plotting des categories de lieux avec des couleurs differentes
-  ax = gdf_shopping2[gdf_shopping2['label'] == l].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = color, ax = ax)
-
-for color, top in zip(colors,top_shopping):
-   ax = gdf_shopping2[gdf_shopping2['name'] == top].plot(figsize=(15, 15), alpha=1, edgecolor='k', color = color, 
-                                                             ax = ax,marker='D',markersize =80,label=top)
-plt.title('Catégorie "Shopping" - n clusters=15',fontsize=20)
-plt.legend()
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("ShoppingNClust15.jpg", dpi = 300)
-st.pyplot()
-
-# Calcul de l'inertie totale de Shopping
-X = gdf_shopping2['X']
-Y = gdf_shopping2['Y']
-centroid = np.array([X.mean(), Y.mean()])
-XY = np.array([X, Y]).T
-inertie_totale = np.mean((XY - centroid)**2)
-inerties = []
-for cluster in gdf_shopping2['label'].unique():
-  X = gdf_shopping2[gdf_shopping2['label'] == cluster]['X']
-  Y = gdf_shopping2[gdf_shopping2['label'] == cluster]['Y']
-  centroid = np.array([X.mean(), Y.mean()])
-  XY = np.array([X, Y]).T
-  inertie = np.mean((XY - centroid)**2)
-  inerties.append(inertie/inertie_totale)
-
-# Tri des couleurs par inertie
-sorted_colors = []
-for i in np.argsort(inerties):
-  sorted_colors.append(colors[i])
-plt.bar(np.arange(0, 15, 1), np.sort(inerties), color = sorted_colors)
-plt.title('Inertie des 15 clusters - Shopping');
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("InertieShopping.jpg", dpi = 300)
-st.pyplot()
-
-# Premier dendrogramme issu d'une classification de type Agglomerative Clustering
-cluster=AgglomerativeClustering(n_clusters=30)
-cluster.fit(gdf_patrimoine.loc[:,['X','Y']])
-labels_CAH=cluster.labels_
-
-Z=linkage(gdf_patrimoine.loc[:,['X','Y']],method='ward',metric='euclidean')
-
-plt.figure(figsize=(20,7))
-plt.title('Dendrogramme CAH',fontsize=20)
-dend=dendrogram(Z,labels=gdf_patrimoine.index,leaf_rotation=90.,color_threshold=0)
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("Dendrogramme.jpg", dpi = 300)
-st.pyplot()
-
-s_scores=[]
-
-for i in range(2,500):
-    cluster=AgglomerativeClustering(n_clusters=i).fit(gdf_patrimoine.loc[:,['X','Y']])
-    sil=silhouette_score(gdf_patrimoine.loc[:,['X','Y']],cluster.labels_,metric='sqeuclidean')
-    s_scores.append(sil)
-tableau=pd.DataFrame(data=[np.arange(10,len(s_scores)+10),s_scores],index=['n_clusters','silhouette score']).transpose()
-
-plt.figure(figsize=(20,7))
-plt.plot(range(10,len(s_scores)+10),s_scores,'r-')
-plt.title('Graphique du coefficient de silhouette en fonction du nombre de clusters',fontsize=20)
-plt.ylabel('Silhouette score',fontsize=15)
-plt.xlabel('Nombre de clusters',fontsize=15);
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("Silhouette.jpg", dpi = 300)
-st.pyplot()
-
-st.text('Le score le plus élevé est :')
-st.table(tableau[tableau['silhouette score']==tableau['silhouette score'].max()])
-
-cluster_CAH=AgglomerativeClustering(n_clusters=248)
-cluster_CAH.fit(gdf_patrimoine.loc[:,['X','Y']])
-labels_CAH=cluster_CAH.labels_
-
-# La difficulté pour visualiser cette classification est au niveau des couleurs. Il est difficile de créer 
-# Une liste de couleurs aussi étendue que le nombre de clusters. 
 
 colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver',
       'maroon','indigo','fuchsia','darkgoldenrod','peachpuff','mediumaquamarine','whitesmoke','black']
 
-# Couleurs de points
-gdf_patrimoine_CAH=gdf_patrimoine.copy()
-gdf_patrimoine_CAH['label']=labels_CAH
-ax = gdf_patrimoine_CAH[gdf_patrimoine_CAH.label==0].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = 'black')
-# Initialisation de la carte
-for color, l in zip(colors,gdf_patrimoine_CAH['label'].sort_values().unique()[1:]):
-  # On plot toutes les categories de lieux avec des couleurs differentes
-  ax = gdf_patrimoine_CAH[gdf_patrimoine_CAH['label'] == l].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = color, ax = ax)
 
-for color, top in zip(colors,top_patrimoine):
-   ax = gdf_patrimoine_CAH[gdf_patrimoine_CAH['name'] == top].plot(figsize=(15, 15), alpha=1, edgecolor='k', color = color, 
-                                                             ax = ax,marker='D',markersize =80,label=top)
-
-plt.legend()
-plt.axis('off')
-plt.title('CAH Clustering - Patrimoine',fontsize = 20)
-ctx.add_basemap(ax,crs=crs,zoom="auto");
-
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("TestCAH.jpg", dpi = 300)
-st.pyplot()
-
-st.text('Sélection du meilleur paramètre pour n_clusters (15) et sauvegarde de la figure')
+# Specral Clustering avec n_clusters 15
 spectral1 = SpectralClustering(n_clusters=15,affinity = 'nearest_neighbors').fit(gdf_patrimoine.loc[:,['X','Y']])
 labelsspec1=spectral1.labels_
-
-colors = ['red','darkblue','darkgreen','yellow','darkorange','cyan','deeppink','steelblue','lime','silver',
-      'maroon','indigo','fuchsia','darkgoldenrod','peachpuff','mediumaquamarine','whitesmoke','black']
-  
-# Couleurs de points
 gdf_patrimoine_spec=gdf_patrimoine.copy()
 gdf_patrimoine_spec['label']=labelsspec1
-ax = gdf_patrimoine_spec[gdf_patrimoine_spec.label==0].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = 'black')
-for color, l in zip(colors,gdf_patrimoine_spec['label'].sort_values().unique()[1:]):
-    ax = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == l].plot(figsize=(15, 15), alpha=0.5, edgecolor='k', color = color, ax = ax)
-for color, top in zip(colors,top_patrimoine):
-  ax = gdf_patrimoine_spec[gdf_patrimoine_spec['name'] == top].plot(figsize=(15, 15), alpha=1, edgecolor='k', color = color, 
-                                                          ax = ax,marker='D',markersize =80,label=top)
-plt.legend()
-plt.title('Spectral Clustering - Patrimoine',fontsize=20)
-plt.axis('off')
-ctx.add_basemap(ax,crs=crs,zoom="auto");
 
-fig.set_size_inches(16,9)
-plt.savefig("TestSpectralClust.jpg", dpi = 300)
-st.pyplot()
 
-st.text("Calcul de l'inertie totale de Shopping")
-X = gdf_patrimoine_spec['X']
-Y = gdf_patrimoine_spec['Y']
-centroid = np.array([X.mean(), Y.mean()])
-XY = np.array([X, Y]).T
-inertie_totale = np.mean((XY - centroid)**2)
-inerties = []
-for cluster in gdf_patrimoine_spec['label'].unique():
-  X = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == cluster]['X']
-  Y = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == cluster]['Y']
-  centroid = np.array([X.mean(), Y.mean()])
-  XY = np.array([X, Y]).T
-  inertie = np.mean((XY - centroid)**2)
-  inerties.append(inertie/inertie_totale)
 
-# Tri des couleurs par inertie
-sorted_colors = []
-for i in np.argsort(inerties):
-  sorted_colors.append(colors[i])
-plt.bar(np.arange(0, 15, 1), np.sort(inerties), color = sorted_colors)
-plt.title('Inertie des 15 clusters - Spectral Clustering');
+# modèle Kmeans avec n_clusters = 15
+kmeans2=KMeans(n_clusters=15).fit(gdf_patrimoine.loc[:,['X','Y']])
+labels2=kmeans2.labels_
+gdf_patrimoine_k=gdf_patrimoine.copy()
+gdf_patrimoine_k['label']=labels2
 
-# Sauvegarde de la figure
-fig.set_size_inches(16,9)
-plt.savefig("InertieSpect.jpg", dpi = 300)
-st.pyplot()
+if slider_modele =='Spectral Clustering' : 
+    gdf_patrimoine_final=gdf_patrimoine_spec.copy()
+elif slider_modele == 'K-Means' : 
+    gdf_patrimoine_final=gdf_patrimoine_k.copy()
+
+
 
 # On intègre les 5 top de pagerank de chaque cluster dans un dataframe 
 tops_per_cluster=pd.DataFrame()
 tops_coord=pd.DataFrame()
 
-for i in range(len(gdf_patrimoine_spec['label'].unique())):
-  X = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == i]['X'].to_numpy().reshape(-1, 1)
-  Y = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == i]['Y'].to_numpy().reshape(-1, 1)
+for i in range(len(gdf_patrimoine_final['label'].unique())):
+  X = gdf_patrimoine_final[gdf_patrimoine_final['label'] == i]['X'].to_numpy().reshape(-1, 1)
+  Y = gdf_patrimoine_final[gdf_patrimoine_final['label'] == i]['Y'].to_numpy().reshape(-1, 1)
 
   XY = np.concatenate([X, Y], axis = 1)
 
 
-# Matrice des distances
+## Matrice des distances
   distances = cdist(XY, XY, metric = 'euclidean')
 
 
-# Scaling entre 0 et 1
+## Scaling entre 0 et 1
   normalized_dists = MinMaxScaler().fit_transform(distances)
 
-# On inverse les distances pour que les lieux les mieux classés
-# soient les lieux les plus proches des autres
+## On inverse les distances pour que les lieux les mieux classés
+## soient les lieux les plus proches des autres
   normalized_dists = 1 - normalized_dists
 
-# On ne veut pas qu'un point soit fortement connecté avec lui même
+## On ne veut pas qu'un point soit fortement connecté avec lui même
   normalized_dists = normalized_dists - np.eye(len(X))
 
-# Normalise sur les lignes pour obtenir une loi de probabilité sur chaque ligne
+## Normalise sur les lignes pour obtenir une loi de probabilité sur chaque ligne
   normalized_dists /= normalized_dists.sum(axis = 1).reshape(-1, 1)
 
-# Application du pagerank
+## Application du pagerank
   G = nx.from_numpy_matrix(normalized_dists) 
   rankings = nx.pagerank(G)
 
-# Top nodes du cluster
+## Top nodes du cluster
   top_nodes = sorted(rankings.items(), key = lambda x: x[1], reverse = True)[:5]
 
-# Enregistrement des coordonnées des top_nodes dans un dataframe "tops_coord"
+## Enregistrement des coordonnées des top_nodes dans un dataframe "tops_coord"
   coord=[]
   for top in top_nodes:
     coord.append(XY[top[0]])
   tops_coord[i]=coord
 
 
-# Enregisterment des top nodes dans le dataframe recapitulatif
+## Enregistrement des top nodes dans le dataframe recapitulatif
   tops_per_cluster[i]=(top_nodes)
 
 
-# Calcul et enregistrement des centroids des pagerank par cluster dans un dataframe "top_centroids"
+## Calcul et enregistrement des centroids des pagerank par cluster dans un dataframe "top_centroids"
 
 top_centroids=pd.DataFrame(index=('X','Y'))
 for cluster in tops_coord.columns:
   top_centroids[cluster]=tops_coord[cluster].mean()
 top_centroids=top_centroids.transpose()
 
-# Identification des restaurants situés le plus près des top_centroids
+# création d'un subjet avec les coordonnées des restaurants 
 
 gdf_restaurants=gdf_paris[gdf_paris['categorie']=='restaurant']
 gdf_restaurants.reset_index(inplace=True)
 Xr = gdf_restaurants['X'].to_numpy().reshape(-1, 1)
 Yr = gdf_restaurants['Y'].to_numpy().reshape(-1, 1)
 XYr=np.concatenate([Xr,Yr], axis = 1)
-XYr
+
+## Identification des restaurants situés le plus près des top_centroids
 restos_index=[]
 for cluster in top_centroids.index:
   xy=np.array([top_centroids.iloc[cluster,0],top_centroids.iloc[cluster,1]])
   restos=cdist(XYr,[xy],metric='euclidean')
   dist_df=pd.DataFrame(restos)
-  liste=dist_df.sort_values(by=0).head(3).index.tolist()
+  liste=dist_df.sort_values(by=0).head(slider_nb_restos).index.tolist()
   restos_index.append(liste)
-  
 
-# Affichage des top 5 pagerank de chaque cluster (en rouge) et 3 restaurants (en vert)
-for clusters in tops_per_cluster.columns:
+
+# Identification des zones commerciales
+gdf_shopping=gdf_paris[ (gdf_paris['categorie']=='shopping')]
+
+optics_clf = OPTICS(min_samples=15,metric='euclidean',
+                    cluster_method='xi').fit(gdf_shopping.loc[:,['X','Y']])
+shop_labels = optics_clf.labels_
+
+## création des polygones à partir des clusters issues du modèle optics_clf
+gdf_shopping['labels']=shop_labels
+gdf_shopping_zones=gdf_shopping.copy()
+
+## Transformations des clusters en Polygones géographiques
+gdf_shopping_zones['geometry'] = gdf_shopping_zones['geometry'].apply(lambda x: x.coords[0])
+
+gdf_shopping_zones =gdf_shopping_zones.groupby('labels')['geometry'].apply(lambda x: Polygon(x.tolist())).reset_index()
+
+gdf_shopping_zones = gpd.GeoDataFrame(gdf_shopping_zones, geometry = 'geometry')
+
+## Identification des centroids de chaque polygone (ou zone commerciale)
+shop_centroids=gdf_shopping_zones.centroid
+
+## identification des zones de Shopping les plus près des top_centroids
+shop_centroids=gpd.GeoDataFrame(gdf_shopping_zones.centroid,columns=['geometry'])
+
+Xs = shop_centroids['geometry'].x.to_numpy().reshape(-1, 1)
+Ys = shop_centroids['geometry'].y.to_numpy().reshape(-1, 1)
+XYs=np.concatenate([Xs,Ys], axis = 1)
+
+shop_centroids_index=[]
+for cluster in top_centroids.index:
+  xy=np.array([top_centroids.iloc[cluster,0],top_centroids.iloc[cluster,1]])
+  shop_dist=cdist(XYs,[xy],metric='euclidean')
+  shop_dist=pd.DataFrame(shop_dist)
+  liste=shop_dist.sort_values(by=0).head(8).index.tolist()
+  shop_centroids_index.append(liste)
+
+
+
+
+# Affichage des top 5 pagerank, restaurants et zones commerciales
+for clusters in range(slider_clusters):
   colors = ['blue' for i in range(120)]
   for node in tops_per_cluster.iloc[:,clusters]:
     colors[node[0]] = 'red'
-  ax = gdf_patrimoine_spec[gdf_patrimoine_spec['label'] == clusters].plot(color = colors)
-  gdf_restaurants.loc[restos_index[clusters]].plot(color = 'green',ax=ax)
-  
+  ax = gdf_patrimoine_final[gdf_patrimoine_final['label'] == clusters].plot(color = colors, alpha = 0.8)
+  gdf_restaurants.loc[restos_index[clusters]].plot(color = 'green',ax=ax, alpha=0.8)
+  gdf_shopping_zones.loc[shop_centroids_index[clusters]].plot(color = 'orange',ax=ax,alpha=0.6)
+  jour=clusters+1
   fig = plt.gcf()
   fig.set_size_inches((9,9))
-  plt.title('Cluster %i' % clusters)
+  plt.title('Jour de visite n° %i' % jour)
   plt.axis('off')
   ctx.add_basemap(ax,crs=crs,zoom="auto")
   st.pyplot()
