@@ -58,8 +58,7 @@ if slider_clusters <11 :
 else : 
     modele_optimal = 'K-Means'
 
-st.sidebar.text('Le modèle optimal pour ce nombre ')
-st.sidebar.text('de jours est ')
+st.sidebar.text('Modèle recommandé')
 st.sidebar.text(modele_optimal)
 
 slider_modele = st.sidebar.select_slider(label='Confirmez le modèle souhaité :',
