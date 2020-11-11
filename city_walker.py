@@ -63,6 +63,9 @@ slider_nb_restos=st.sidebar.slider(label='Nombre de restaurants proposés',
 selectbox_type_restaurant = st.sidebar.selectbox(label='Type de restaurants', 
                                options=['Peu importe', 'Restaurant traditionnel','Fast Food'])
 
+## Affichage des étiquettes des points prioritaires
+selectbox_labels= st.sidebar.selectbox(label='Afficher les noms des lieux',
+                                       options=['Non','Oui'])
 
 #######################################################################
 #Boucle de sélection du modèle de clusering
@@ -197,7 +200,7 @@ for cluster in top_centroids.index:
   xy=np.array([top_centroids.iloc[cluster,0],top_centroids.iloc[cluster,1]])
   shop_dist=cdist(XYs,[xy],metric='euclidean')
   shop_dist=pd.DataFrame(shop_dist)
-  liste=shop_dist.sort_values(by=0).head(4).index.tolist()
+  liste=shop_dist.sort_values(by=0).head(3).index.tolist()
   shop_centroids_index.append(liste)
 
 
@@ -235,11 +238,12 @@ for clusters in range(slider_clusters):
         ax.plot(x,y,color='r',alpha=0.8,ls='-.')
     
     ## Annotation des noms des points prioritaires
-    for node in tops_per_cluster.iloc[:,clusters]:
-      ax.annotate(gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],5],
-              xy=(gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],1],
-                  gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],2]), 
-              xytext=(3,3), textcoords="offset points")
+    if selectbox_labels == 'Oui':
+        for node in tops_per_cluster.iloc[:,clusters]:
+            ax.annotate(gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],5],
+                        xy=(gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],1],
+                            gdf_patrimoine[gdf_patrimoine['label'] == clusters].iloc[node[0],2]), 
+                        xytext=(3,3), textcoords="offset points")
   
   
     jour=clusters+1
