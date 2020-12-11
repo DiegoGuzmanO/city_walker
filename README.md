@@ -9,6 +9,8 @@ In his approach we will be using unsupervised machine learning (clustering), Geo
 Python -> Follow PEP8.
 ## Tech/framework used
 [Streamlit](https://www.streamlit.io/)
+## test
+[see our prototype in action here !](https://share.streamlit.io/diegoguzmano/city_walker/main/city_walker.py)
 ## Contribute
 If you want to contribute, here are some optimizations that I see necesary : 
 * Webscraping
