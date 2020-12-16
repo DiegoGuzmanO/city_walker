@@ -17,7 +17,7 @@ st.image(
          )
 
 
-code_display = st.sidebar.radio(label="Afficher le code", 
+code_display = st.sidebar.radio(label="Afficher le code :", 
                                 options=["Non", "Oui"])
 
 if code_display =="Oui":
